@@ -7,7 +7,7 @@ An Enterprise Knowledge Intelligence Agent designed to help organizations search
 - Intelligent document search
 - Question answering
 - Executive summaries
-- Source-grounded responses
+- Source grounded responses
 - Hallucination prevention guardrails
 
 ## Tech Stack
