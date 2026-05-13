@@ -30,8 +30,8 @@ with st.sidebar:
     st.write("• PDF document upload")
     st.write("• Semantic document search")
     st.write("• LangGraph agent workflow")
-    st.write("• AI-generated answers")
-    st.write("• Source-grounded responses")
+    st.write("• AI generated answers")
+    st.write("• Source grounded responses")
     st.write("• Hallucination guardrails")
 
     st.subheader("Tech Stack")
