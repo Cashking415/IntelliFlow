@@ -1,4 +1,4 @@
-# InsightFlow
+# IntelliFlow
 
 An Enterprise Knowledge Intelligence Agent designed to help organizations search, summarize, and analyze internal business documents using Retrieval Augmented Generation (RAG).
 
