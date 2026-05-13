@@ -1,10 +1,12 @@
 import streamlit as st
 from pypdf import PdfReader
 from dotenv import load_dotenv
+from typing import TypedDict, List
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langgraph.graph import StateGraph, END
 
 load_dotenv()
 
@@ -27,14 +29,79 @@ with st.sidebar:
     st.subheader("Core Features")
     st.write("• PDF document upload")
     st.write("• Semantic document search")
+    st.write("• LangGraph agent workflow")
     st.write("• AI-generated answers")
     st.write("• Source-grounded responses")
     st.write("• Hallucination guardrails")
 
     st.subheader("Tech Stack")
-    st.write("Python · Streamlit · LangChain · ChromaDB · OpenAI")
+    st.write("Python · Streamlit · LangGraph · LangChain · ChromaDB · OpenAI")
+
+
+class AgentState(TypedDict):
+    question: str
+    context: str
+    answer: str
+    sources: List[str]
+
+
+def build_agent_graph(vectorstore, llm):
+    def retrieve_context(state: AgentState):
+        docs = vectorstore.similarity_search(state["question"], k=4)
+        context = "\n\n".join([doc.page_content for doc in docs])
+        sources = [doc.page_content for doc in docs]
+
+        return {
+            "question": state["question"],
+            "context": context,
+            "answer": "",
+            "sources": sources
+        }
+
+    def generate_answer(state: AgentState):
+        prompt = f"""
+You are InsightFlow, an enterprise knowledge assistant.
+
+Use ONLY the provided document context to answer the user's question.
+
+Rules:
+- Give a clear, professional answer.
+- Use bullet points when helpful.
+- Do not make up information.
+- If the answer is not found in the context, say:
+  "I could not find that information in the uploaded document."
+- Keep the answer concise but useful.
+
+Document Context:
+{state["context"]}
+
+User Question:
+{state["question"]}
+"""
+
+        response = llm.invoke(prompt)
+
+        return {
+            "question": state["question"],
+            "context": state["context"],
+            "answer": response.content,
+            "sources": state["sources"]
+        }
+
+    graph = StateGraph(AgentState)
+
+    graph.add_node("retrieve_context", retrieve_context)
+    graph.add_node("generate_answer", generate_answer)
+
+    graph.set_entry_point("retrieve_context")
+    graph.add_edge("retrieve_context", "generate_answer")
+    graph.add_edge("generate_answer", END)
+
+    return graph.compile()
+
 
 st.markdown("### Upload Business Document")
+
 uploaded_file = st.file_uploader(
     "Upload a PDF file to begin",
     type="pdf"
@@ -70,16 +137,18 @@ if uploaded_file:
 
     st.info(f"Knowledge base ready. Created {len(chunks)} searchable text chunks.")
 
+    llm = ChatOpenAI(
+        model="gpt-3.5-turbo",
+        temperature=0.2
+    )
+
+    agent_graph = build_agent_graph(vectorstore, llm)
+
     st.markdown("### Ask a Question")
 
     question = st.text_input(
         "Ask something about the uploaded document",
         placeholder="Example: What are the main points in this document?"
-    )
-
-    llm = ChatOpenAI(
-        model="gpt-3.5-turbo",
-        temperature=0.2
     )
 
     col1, col2 = st.columns(2)
@@ -91,54 +160,37 @@ if uploaded_file:
         summary_button = st.button("Generate Executive Summary")
 
     if ask_button and question:
-        with st.spinner("Searching document and generating answer..."):
-            docs = vectorstore.similarity_search(question, k=4)
-            context = "\n\n".join([doc.page_content for doc in docs])
-
-            prompt = f"""
-You are InsightFlow, an enterprise knowledge assistant.
-
-Use ONLY the provided document context to answer the user's question.
-
-Rules:
-- Give a clear, professional answer.
-- Use bullet points when helpful.
-- Do not make up information.
-- If the answer is not found in the context, say:
-  "I could not find that information in the uploaded document."
-- Keep the answer concise but useful.
-
-Document Context:
-{context}
-
-User Question:
-{question}
-"""
-
+        with st.spinner("Running LangGraph agent workflow..."):
             try:
-                response = llm.invoke(prompt)
+                result = agent_graph.invoke({
+                    "question": question,
+                    "context": "",
+                    "answer": "",
+                    "sources": []
+                })
 
                 st.markdown("### AI Answer")
-                st.write(response.content)
+                st.write(result["answer"])
 
                 st.markdown("### Source Evidence")
-                for i, doc in enumerate(docs):
+                for i, source in enumerate(result["sources"]):
                     with st.expander(f"Source Chunk {i + 1}"):
-                        st.write(doc.page_content)
+                        st.write(source)
 
             except Exception as e:
-                st.error(f"OpenAI Error: {e}")
+                st.error(f"Agent Error: {e}")
 
     if summary_button:
         with st.spinner("Generating executive summary..."):
-            docs = vectorstore.similarity_search(
-                "main points key ideas summary overview conclusions",
-                k=6
-            )
+            try:
+                docs = vectorstore.similarity_search(
+                    "main points key ideas summary overview conclusions",
+                    k=6
+                )
 
-            context = "\n\n".join([doc.page_content for doc in docs])
+                context = "\n\n".join([doc.page_content for doc in docs])
 
-            summary_prompt = f"""
+                summary_prompt = f"""
 You are InsightFlow, an enterprise knowledge assistant.
 
 Create an executive summary of the uploaded document using ONLY the context below.
@@ -155,7 +207,6 @@ Document Context:
 {context}
 """
 
-            try:
                 summary_response = llm.invoke(summary_prompt)
 
                 st.markdown("### Executive Summary")
